@@ -1,0 +1,58 @@
+#include <Wire.h>
+#include <Adafruit_PN532.h>
+
+#define SDA_PIN 21 
+#define SCL_PIN 22 
+
+Adafruit_PN532 nfc(SDA_PIN, SCL_PIN);
+
+void setup() {
+  Serial.begin(115200);
+  nfc.begin();
+  nfc.SAMConfig();
+  Serial.println("Place card to write USER1...");
+
+  uint8_t keya[6] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+
+  while (1) {
+    uint8_t uid[7];
+    uint8_t uidLength;
+    
+    if (nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uidLength)) {
+      Serial.print("Card detected! UID: ");
+      for (uint8_t i = 0; i < uidLength; i++) {
+        Serial.print(uid[i], HEX); 
+        Serial.print(" ");
+      }
+      Serial.println();
+
+      if (nfc.mifareclassic_AuthenticateBlock(uid, uidLength, 4, 0, keya)) {
+        // Write "USER1" to the card
+        uint8_t data[16] = { 'U', 'S', 'E', 'R', '2', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+        
+        if (nfc.mifareclassic_WriteDataBlock(4, data)) {
+          Serial.println("Write successful! USER2 written to card.");
+        } else {
+          Serial.println("Write failed!");
+        }
+
+        // Read back to verify
+        uint8_t readData[16];
+        if (nfc.mifareclassic_ReadDataBlock(4, readData)) {
+          Serial.print("Verified data: ");
+          for (int i = 0; i < 16; i++) {
+            if (readData[i] != 0) Serial.print((char)readData[i]);
+          }
+          Serial.println();
+        }
+      } else {
+        Serial.println("Authentication failed!");
+      }
+      
+      Serial.println("---");
+      delay(3000);
+    }
+  }
+}
+
+void loop() {}

@@ -1,0 +1,47 @@
+#include <Arduino.h>
+#include <Wire.h>
+#include <Adafruit_PN532.h>
+
+// Define I2C pins foe Esp32
+#define SDA_PIN 21
+#define SCL_PIN 22
+
+Adafruit_PN532 nfc(SDA_PIN, SCL_PIN);
+
+
+void setup() {
+  Serial.begin(115200);
+  while(!Serial);
+  Serial.println("PN532 NFC reader test");
+
+  nfc.begin();
+  uint32_t versiondata = nfc.getFirmwareVersion();
+  if(!versiondata){
+    Serial.println("Didnt find the board");
+    while (1); delay(10); 
+  }
+  // Print Firmware version
+  Serial.print("Found PN532 with firmware version:");
+  Serial.print((versiondata >> 24) & 0xFF, HEX);
+  Serial.print(".");
+  Serial.print((versiondata >> 16) & 0xFF, HEX);
+
+  nfc.SAMConfig();
+  Serial.println("Waiting for the card");
+}
+
+void loop(){
+  uint8_t uid[7]; // Buffer to store the returned UID
+  uint8_t uidLength; // Length of the UId(4 or 7 bytes)
+
+  //Check for nfc card
+  if(nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uidLength)){
+    Serial.print("Card detected UID: ");
+    for (uint8_t i = 0; i < uidLength; i++) {
+      Serial.print(uid[i], HEX);
+      if(i < uidLength - 1) Serial.print(":");
+    }
+    Serial.println();
+    delay(1500);
+}
+}
