@@ -1,0 +1,73 @@
+//MIFARE Ultralight card(or compatible NTAG)
+#include <Wire.h>
+#include <Adafruit_PN532.h>
+
+#define SDA_PIN 21
+#define SCL_PIN 22
+
+Adafruit_PN532 nfc(SDA_PIN, SCL_PIN);
+
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+
+  nfc.begin();
+  uint32_t versiondata = nfc.getFirmwareVersion();
+  if (!versiondata) {
+    Serial.println("Didn't find PN53x board");
+    while (1);
+  }
+  nfc.SAMConfig();
+  Serial.println("Waiting for a MIFARE Ultralight (or NTAG) card...");
+}
+
+void loop() {
+  uint8_t uid[7];
+  uint8_t uidLength;
+
+  // Look for a card (wait up to 1 second)
+  if (nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uidLength, 1000)) {
+    Serial.print("Card detected! UID: ");
+    for (uint8_t i = 0; i < uidLength; i++) {
+      Serial.print(uid[i], HEX); Serial.print(" ");
+    }
+    Serial.println();
+
+    // Data to write (max 8 chars for pages 4 and 5)
+    char text[9] = "USER5u";
+    uint8_t page4[4] = { text[0], text[1], text[2], text[3] };
+    uint8_t page5[4] = { text[4], text[5], text[6], text[7] };
+
+    // Write to page 4 and 5
+    if (nfc.mifareultralight_WritePage(4, page4))
+      Serial.println("Wrote to page 4.");
+    else
+      Serial.println("Write to page 4 FAILED!");
+
+    if (nfc.mifareultralight_WritePage(5, page5))
+      Serial.println("Wrote to page 5.");
+    else
+      Serial.println("Write to page 5 FAILED!");
+
+    // Read back pages 4 and 5
+    uint8_t data[4];
+    Serial.print("Read page 4: ");
+    if (nfc.mifareultralight_ReadPage(4, data)) {
+      for (int i = 0; i < 4; i++) Serial.print((char)data[i]);
+      Serial.println();
+    } else {
+      Serial.println("Read failed!");
+    }
+
+    Serial.print("Read page 5: ");
+    if (nfc.mifareultralight_ReadPage(5, data)) {
+      for (int i = 0; i < 4; i++) Serial.print((char)data[i]);
+      Serial.println();
+    } else {
+      Serial.println("Read failed!");
+    }
+
+    Serial.println("---");
+    delay(3000); // Wait 3 seconds before next scan
+  }
+}
