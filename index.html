@@ -21,8 +21,8 @@
   </style>
 </head>
 <body>
-  <h2 style="text-align:center">Staff Attendance</h2>
-  <form id="attendanceForm" autocomplete="off">
+  <h2 style="text-align:center">Registration Form</h2>
+  <form id="Registration Form" autocomplete="off">
     <label for="name">Full Name</label>
     <input type="text" id="name" required>
 
@@ -43,7 +43,7 @@
 
     <button type="button" id="scanNfc" class="nfc-btn">Scan via Phone NFC (Android)</button>
 
-    <button type="submit" style="margin-top:18px;">Mark Attendance</button>
+    <button type="submit" style="margin-top:18px;">Register</button>
   </form>
 
   <div id="result" style="text-align:center; margin-top:24px; color: #227722;"></div>
@@ -111,7 +111,7 @@
     });
 
     // Form submission: works for both phone and external reader
-    document.getElementById('attendanceForm').addEventListener('submit', async function(event) {
+    document.getElementById('Registration Form').addEventListener('submit', async function(event) {
       event.preventDefault();
       const name = document.getElementById('name').value.trim();
       const email = document.getElementById('email').value.trim();
@@ -126,7 +126,7 @@
       }
 
       try {
-        await db.collection('attendance').add({
+        await db.collection('registration').add({
           name: name,
           email: email,
           department: department,
@@ -134,12 +134,12 @@
           timestamp: firebase.firestore.Timestamp.fromDate(timestamp),
           status: "present"
         });
-        document.getElementById('result').innerText = "Attendance recorded successfully!";
+        document.getElementById('result').innerText = "Registration successfully!";
         document.getElementById('result').style.color = "#227722";
         document.getElementById('attendanceForm').reset();
         nfcField.focus();
       } catch (error) {
-        document.getElementById('result').innerText = "Error recording attendance: " + error;
+        document.getElementById('result').innerText = "Error registering: " + error;
         document.getElementById('result').style.color = "#b22222";
       }
     });
@@ -152,7 +152,7 @@
           document.getElementById('name').value.trim() &&
           document.getElementById('nfc_uid').value.trim()
         ) {
-          document.getElementById('attendanceForm').requestSubmit();
+          document.getElementById('Registration Form').requestSubmit();
         }
       }
     });
