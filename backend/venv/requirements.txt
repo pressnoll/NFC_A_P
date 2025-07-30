@@ -2,3 +2,4 @@ flask
 firebase-admin
 pytz
 gunicorn
+flask-cors
