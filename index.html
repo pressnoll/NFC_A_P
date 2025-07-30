@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Universal Staff Attendance Registration</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    form {
+      max-width: 400px;
+      margin: 40px auto;
+      padding: 20px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      background: #fafafa;
+    }
+    label { display: block; margin-top: 12px; }
+    input, select, button { width: 100%; padding: 8px; margin-top: 4px; }
+    .nfc-btn { margin-top: 16px; background: #2277cc; color: white; border: none; border-radius: 5px; }
+    .nfc-btn:disabled { background: #aaa; }
+    .readonly { background: #f3f3f3; color: #888; }
+  </style>
+</head>
+<body>
+  <h2 style="text-align:center">Registration Form</h2>
+  <form id="Registration Form" autocomplete="off">
+    <label for="name">Full Name</label>
+    <input type="text" id="name" required>
+
+    <label for="email">Email</label>
+    <input type="email" id="email">
+
+    <label for="department">Department</label>
+    <input type="text" id="department">
+
+    <label for="nfc_uid">
+      NFC Card UID
+      <small style="display:block;font-size:13px;color:#555;">
+        (Scan your tag using your phone OR a USB NFC reader)
+      </small>
+    </label>
+    <input type="text" id="nfc_uid" required autocomplete="off"
+           placeholder="Scan NFC tag/card with your phone or PC reader">
+
+    <button type="button" id="scanNfc" class="nfc-btn">Scan via Phone NFC (Android)</button>
+
+    <button type="submit" style="margin-top:18px;">Register</button>
+  </form>
+
+  <div id="result" style="text-align:center; margin-top:24px; color: #227722;"></div>
+
+  <!-- Firebase App (the core Firebase SDK) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <!-- Firebase Firestore SDK -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <script>
+    // Your Firebase configuration
+    const firebaseConfig = {
+      apiKey: "AIzaSyCytlR0qZW9iRJV2k7767qeCpQpUv8zOj8",
+      authDomain: "nfc-attendance-8a156.firebaseapp.com",
+      projectId: "nfc-attendance-8a156",
+      storageBucket: "nfc-attendance-8a156.appspot.com",
+      messagingSenderId: "346515402173",
+      appId: "1:346515402173:web:f3f111a8755dcb3fb036d4",
+      measurementId: "G-8H9B925B8Q"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+
+    // Focus on UID field when page loads for USB NFC reader users
+    window.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('nfc_uid').focus();
+    });
+
+    // Web NFC (Android) logic
+    const scanBtn = document.getElementById('scanNfc');
+    const nfcField = document.getElementById('nfc_uid');
+    scanBtn.addEventListener('click', async function() {
+      if (!("NDEFReader" in window)) {
+        document.getElementById('result').innerText = "Web NFC is not supported on this device/browser. Please use a USB NFC reader or type the UID manually.";
+        document.getElementById('result').style.color = "#b22222";
+        return;
+      }
+      scanBtn.disabled = true;
+      document.getElementById('result').innerText = "Hold your NFC tag/card near your phone...";
+      document.getElementById('result').style.color = "#2277cc";
+      try {
+        const reader = new NDEFReader();
+        await reader.scan();
+        reader.onreading = event => {
+          if (event.serialNumber) {
+            nfcField.value = event.serialNumber;
+            document.getElementById('result').innerText = "NFC tag detected! UID: " + event.serialNumber;
+            document.getElementById('result').style.color = "#227722";
+            scanBtn.disabled = false;
+          } else {
+            document.getElementById('result').innerText = "NFC tag detected, but UID not available.";
+            document.getElementById('result').style.color = "#b22222";
+            scanBtn.disabled = false;
+          }
+        };
+        reader.onerror = event => {
+          document.getElementById('result').innerText = "Error reading NFC: " + event.error;
+          document.getElementById('result').style.color = "#b22222";
+          scanBtn.disabled = false;
+        };
+      } catch (error) {
+        document.getElementById('result').innerText = "NFC scan failed: " + error;
+        document.getElementById('result').style.color = "#b22222";
+        scanBtn.disabled = false;
+      }
+    });
+
+    // Form submission: works for both phone and external reader
+    document.getElementById('Registration Form').addEventListener('submit', async function(event) {
+      event.preventDefault();
+      const name = document.getElementById('name').value.trim();
+      const email = document.getElementById('email').value.trim();
+      const department = document.getElementById('department').value.trim();
+      const nfc_uid = document.getElementById('nfc_uid').value.trim();
+      const timestamp = new Date();
+
+      if (!nfc_uid) {
+        document.getElementById('result').innerText = "Please scan your NFC card/tag before submitting!";
+        document.getElementById('result').style.color = "#b22222";
+        return;
+      }
+
+      try {
+        await db.collection('registration').add({
+          name: name,
+          email: email,
+          department: department,
+          nfc_uid: nfc_uid,
+          timestamp: firebase.firestore.Timestamp.fromDate(timestamp),
+          status: "present"
+        });
+        document.getElementById('result').innerText = "Registration successfully!";
+        document.getElementById('result').style.color = "#227722";
+        document.getElementById('attendanceForm').reset();
+        nfcField.focus();
+      } catch (error) {
+        document.getElementById('result').innerText = "Error registering: " + error;
+        document.getElementById('result').style.color = "#b22222";
+      }
+    });
+
+    // Optional: allow Enter key to submit when UID is filled by external reader
+    nfcField.addEventListener('keyup', function(event) {
+      // If Enter is pressed, and required fields are filled, submit form
+      if (event.key === 'Enter') {
+        if (
+          document.getElementById('name').value.trim() &&
+          document.getElementById('nfc_uid').value.trim()
+        ) {
+          document.getElementById('Registration Form').requestSubmit();
+        }
+      }
+    });
+  </script>
+</body>
+</html>
