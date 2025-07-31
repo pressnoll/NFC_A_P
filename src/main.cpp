@@ -91,21 +91,6 @@ void setup(){
         digitalWrite(LED_ERROR, LOW);
         delay(200);
     }
-
-    // OLED display initialization commented out
-    /*
-    if(!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
-        Serial.println(F("SSD1306 allocation failed"));
-        // if display fails continue but show error on LEDs
-        digitalWrite(LED_ERROR, HIGH);
-        delay(100);
-        digitalWrite(LED_ERROR, LOW);
-    }
-
-    // Display setup - updated to use the enhanced displayMessage function
-    displayMessage("STARTUP", "Attendance System\nInitializing...", false);
-    delay(1000);
-    */
     
     // Log to Serial instead
     logMessage("STARTUP", "Attendance System\nInitializing...", false);
@@ -219,7 +204,9 @@ void loop() {
             }
         }
         
-        cardUID.toUpperCase();
+        // Match the case used in your Firebase database (lowercase)
+        cardUID.toLowerCase(); // Changed from toUpperCase() to match Firebase format
+        
         Serial.print("Card detected! UID: ");
         Serial.println(cardUID);
         
@@ -245,7 +232,7 @@ void sendAttendanceData(String uid) {
         
         // Create JSON payload
         StaticJsonDocument<200> doc;
-        doc["uid"] = uid;
+        doc["uid"] = uid; // This matches the field name expected by your Flask backend
         doc["device_id"] = DEVICE_ID;
         
         String jsonPayload;
@@ -264,31 +251,35 @@ void sendAttendanceData(String uid) {
             Serial.println(httpResponseCode);
             Serial.println(response);
             
-            // Parse response to extract user name if possible
-            String userName = "User";
-            if(httpResponseCode == 201) {
-                DynamicJsonDocument respDoc(1024);
-                deserializeJson(respDoc, response);
-                if(respDoc.containsKey("user")) {
+            // Parse response
+            DynamicJsonDocument respDoc(1024);
+            DeserializationError error = deserializeJson(respDoc, response);
+            
+            // Different handling based on response code
+            if (httpResponseCode == 201) {  // Created status - successful attendance
+                String userName = "User";
+                if (!error && respDoc.containsKey("user")) {
                     userName = respDoc["user"].as<String>();
                 }
-            }
-            
-            // Check if the request was successful
-            if (httpResponseCode == 201) {  // Created status
                 flashLED(LED_SUCCESS, 1);
                 logMessage("SUCCESS", "Welcome, " + userName + "\nAttendance recorded", false);
-            } else {
+            } 
+            else if (httpResponseCode == 404) {  // Not Found - card not registered
+                flashLED(LED_ERROR, 2);
+                logMessage("NOT REGISTERED", "Card not registered\nPlease register first", true);
+            }
+            else if (httpResponseCode == 400 && !error && respDoc.containsKey("error")) {
+                // Already recorded attendance today
+                String errorMsg = respDoc["error"].as<String>();
+                flashLED(LED_ERROR, 1);
+                logMessage("ALREADY RECORDED", errorMsg, true);
+            }
+            else {
+                // Other errors
                 flashLED(LED_ERROR, 1);
                 String errorMsg = "Error: ";
-                if(response.length() > 0) {
-                    DynamicJsonDocument respDoc(1024);
-                    DeserializationError error = deserializeJson(respDoc, response);
-                    if (!error && respDoc.containsKey("error")) {
-                        errorMsg += respDoc["error"].as<String>();
-                    } else {
-                        errorMsg += "Code " + String(httpResponseCode);
-                    }
+                if(!error && respDoc.containsKey("error")) {
+                    errorMsg += respDoc["error"].as<String>();
                 } else {
                     errorMsg += "Code " + String(httpResponseCode);
                 }
