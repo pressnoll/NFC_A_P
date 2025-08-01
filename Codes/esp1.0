@@ -2,22 +2,36 @@
 #include <Wire.h>
 #include <Adafruit_PN532.h>
 #include <WiFi.h>
-#include <WiFiManager.h>
-#include <DNSServer.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
+// OLED libraries commented out
+//#include <Adafruit_GFX.h>
+//#include <Adafruit_SSD1306.h>
 
 // I2C pins for both device
 #define I2C_SDA 21
 #define I2C_SCL 22
+
+// Oled display settings commented out
+/*
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_RESET -1
+#define SCREEN_ADDRESS 0x3C 
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+*/
 
 // Create PN532 instance with I2C
 #define PN532_IQR  (-1)
 #define PN532_RESET (-1)
 Adafruit_PN532 nfc(PN532_IQR, PN532_RESET);
 
+// Wifi credentials
+const char* ssid = "Galaxy S10e51a0";
+const char* password = "123456789";
+
 // Backend API URL
-const char* serverUrl = "http://192.168.45.249:5000/api/attendance"; 
+const char* serverUrl = "http://192.168.45.249:5000/api/attendance"; // will have to change later
 
 // Define device ID
 #define DEVICE_ID "esp32-main-entrance"
@@ -26,11 +40,10 @@ const char* serverUrl = "http://192.168.45.249:5000/api/attendance";
 #define LED_SUCCESS 25 //GREEN LED
 #define LED_ERROR 26 //RED LED
 
-// Function declarations
+// Function declarations - modified to use Serial instead of display
 void logMessage(String title, String message, bool isError);
 void flashLED(int pin, int times);
 void sendAttendanceData(String uid);
-void setupWiFiManager();
 
 // Modified to log to Serial instead of display
 void logMessage(String title, String message, bool isError) {
@@ -59,7 +72,7 @@ void flashLED(int pin, int times) {
 void setup(){
     // begin serial communications
     Serial.begin(115200);
-    delay(1000);
+    while (!Serial) delay(10);
     Serial.println("NFC Attendance System");
 
     // Initialize I2C
@@ -79,7 +92,9 @@ void setup(){
         delay(200);
     }
     
+    // Log to Serial instead
     logMessage("STARTUP", "Attendance System\nInitializing...", false);
+    delay(1000);
 
     // Initialize NFC reader with I2C
     nfc.begin();
@@ -105,81 +120,44 @@ void setup(){
     nfc.SAMConfig();
     delay(1000);
 
-    // Setup WiFi using our enhanced function
-    setupWiFiManager();
+    // connect to wifi
+    logMessage("WIFI", "Connecting to:\n" + String(ssid), false);
+
+    WiFi.begin(ssid, password);
+    Serial.print("Connecting to WiFi");
+
+    int dots = 0;
+    int attempts = 0;
+    while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+        delay(500);
+        Serial.print(".");
+        dots++;
+        attempts++;
+
+        if (dots >= 20) {
+            dots = 0;
+        }
+    }
+
+    if (WiFi.status() != WL_CONNECTED) {
+        Serial.println("\nWiFi connection failed");
+        logMessage("ERROR", "WiFi connection\nfailed!\n\nCheck settings", true);
+        digitalWrite(LED_ERROR, HIGH);
+        delay(5000);
+    } else {
+        Serial.println("\nWiFi Connected!");
+        Serial.print("IP Address: ");
+        Serial.println(WiFi.localIP());
+
+        // If alright flash led and show ready message
+        flashLED(LED_SUCCESS, 3);
+
+        String ipAddress = "IP: " + WiFi.localIP().toString();
+        logMessage("CONNECTED", ipAddress + "\nSystem Ready", false);
+        delay(2000);
+    }
 
     logMessage("READY", "Scan your card", false);
-}
-
-void setupWiFiManager() {
-    logMessage("WIFI", "Starting WiFi setup", false);
-    
-    // Keep LED on during WiFi setup for clear visual feedback
-    digitalWrite(LED_SUCCESS, HIGH);
-    
-    // Create WiFiManager instance
-    WiFiManager wifiManager;
-    
-    // Uncomment to reset settings and force portal mode (for testing)
-    // wifiManager.resetSettings();
-    
-    // Use custom parameters if needed (like custom server URL)
-    // WiFiManagerParameter custom_server("server", "Server URL", serverUrl, 40);
-    // wifiManager.addParameter(&custom_server);
-    
-    // IMPORTANT: Enhanced captive portal settings
-    wifiManager.setAPStaticIPConfig(IPAddress(10,0,1,1), IPAddress(10,0,1,1), IPAddress(255,255,255,0));
-    
-    // Set portal timeout (3 minutes)
-    wifiManager.setConfigPortalTimeout(180);
-
-    // Enhanced portal name for clarity
-    const char* apName = "NFC-AttendanceSetup";
-    const char* apPassword = ""; // No password for easier access
-    
-    Serial.println("\n╔═════════════════════════════════════════╗");
-    Serial.println("║              WIFI SETUP                 ║");
-    Serial.println("╠═════════════════════════════════════════╣");
-    Serial.println("║ 1. Connect to WiFi: NFC-AttendanceSetup ║");
-    Serial.println("║ 2. Wait for portal OR                  ║");
-    Serial.println("║    Navigate to: http://10.0.1.1        ║");
-    Serial.println("╚═════════════════════════════════════════╝\n");
-    
-    logMessage("WIFI SETUP", "Connect to WiFi:\nNFC-AttendanceSetup\nThen follow instructions", false);
-    
-    // Flash the LED in a distinct pattern while in setup mode
-    for (int i = 0; i < 5; i++) {
-        digitalWrite(LED_SUCCESS, HIGH);
-        delay(100);
-        digitalWrite(LED_SUCCESS, LOW);
-        delay(100);
-    }
-    digitalWrite(LED_SUCCESS, HIGH); // Keep on during setup
-    
-    // Start the config portal in blocking mode
-    // This uses the enhanced captive portal detection
-    bool result = wifiManager.startConfigPortal(apName, apPassword);
-    
-    // Turn off the LED after setup
-    digitalWrite(LED_SUCCESS, LOW);
-    
-    if (!result) {
-        Serial.println("Failed to connect or timeout");
-        logMessage("ERROR", "WiFi setup failed\nRestarting...", true);
-        delay(3000);
-        ESP.restart();
-    }
-    
-    // If we get here, we're connected to WiFi
-    Serial.println("WiFi Connected!");
-    Serial.print("IP Address: ");
-    Serial.println(WiFi.localIP());
-    
-    // Success indication
-    flashLED(LED_SUCCESS, 3);
-    String ipAddress = "IP: " + WiFi.localIP().toString();
-    logMessage("CONNECTED", ipAddress + "\nSystem Ready", false);
-    delay(1000);
 }
 
 void loop() {
@@ -187,24 +165,8 @@ void loop() {
     if (WiFi.status() != WL_CONNECTED) {
         Serial.println("WiFi disconnected. Reconnecting...");
         logMessage("ERROR", "WiFi disconnected\nReconnecting...", true);
-        WiFi.begin(); // Reconnect using stored credentials
-        
-        int attempts = 0;
-        while (WiFi.status() != WL_CONNECTED && attempts < 20) {
-            delay(500);
-            Serial.print(".");
-            attempts++;
-        }
-        
-        if (WiFi.status() == WL_CONNECTED) {
-            String ipAddress = "IP: " + WiFi.localIP().toString();
-            logMessage("RECONNECTED", ipAddress + "\nSystem Ready", false);
-        } else {
-            logMessage("ERROR", "WiFi failed\nCheck connection", true);
-            // If reconnection fails after multiple attempts, restart WiFi setup
-            setupWiFiManager();
-        }
-        
+        WiFi.begin(ssid, password);
+        delay(5000);  
         logMessage("READY", "Scan your card", false);
         return;
     }
@@ -243,7 +205,7 @@ void loop() {
         }
         
         // Match the case used in your Firebase database (lowercase)
-        cardUID.toLowerCase();
+        cardUID.toLowerCase(); // Changed from toUpperCase() to match Firebase format
         
         Serial.print("Card detected! UID: ");
         Serial.println(cardUID);

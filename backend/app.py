@@ -15,7 +15,34 @@ db = None
 
 # Firebase initialization with better error handling
 try:
-    cred = credentials.Certificate("firebase_config.json")
+    # Check if we have Firebase service account credentials
+    firebase_config_path = os.environ.get('FIREBASE_CONFIG_PATH', 'firebase_config.json')
+    
+    if os.path.exists(firebase_config_path):
+        # Use service account file
+        cred = credentials.Certificate(firebase_config_path)
+    else:
+        # Try to use environment variables for production
+        import json
+        firebase_config = {
+            "type": "service_account",
+            "project_id": os.environ.get('FIREBASE_PROJECT_ID'),
+            "private_key_id": os.environ.get('FIREBASE_PRIVATE_KEY_ID'),
+            "private_key": os.environ.get('FIREBASE_PRIVATE_KEY', '').replace('\\n', '\n'),
+            "client_email": os.environ.get('FIREBASE_CLIENT_EMAIL'),
+            "client_id": os.environ.get('FIREBASE_CLIENT_ID'),
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+            "client_x509_cert_url": os.environ.get('FIREBASE_CLIENT_X509_CERT_URL')
+        }
+        
+        # Check if all required env vars are present
+        if not all([firebase_config[key] for key in ['project_id', 'private_key', 'client_email']]):
+            raise ValueError("Missing required Firebase environment variables")
+        
+        cred = credentials.Certificate(firebase_config)
+    
     firebase_admin.initialize_app(cred)
     db = firestore.client()
     print("Firebase connection established successfully")
@@ -47,7 +74,7 @@ def get_user_by_uid(nfc_uid):
         return None
 
 def record_attendance(user_id, nfc_uid, name, department, device_id="unknown"):
-    """Record an attendance event using date-based subcollections"""
+    """Record an attendance event using date-based subcollections without departments tracking"""
     if db is None:
         print("ERROR: Database not initialized")
         return None, "Database connection error"
@@ -57,15 +84,15 @@ def record_attendance(user_id, nfc_uid, name, department, device_id="unknown"):
         today = now.strftime("%Y-%m-%d")
         
         # Reference to today's attendance document
-        date_doc_ref = db.collection('attendance_by_date').document(today)
+        date_doc_ref = db.collection('attendance').document(today)
         
-        # Create the date document if it doesn't exist
+        # Create the date document if it doesn't exist, but without departments
         date_doc = date_doc_ref.get()
         if not date_doc.exists:
             date_doc_ref.set({
                 'date': today,
-                'count': 0,
-                'departments': {}
+                'count': 0
+                # Removed departments field completely
             })
         
         # Check if user already has attendance record for today
@@ -91,10 +118,10 @@ def record_attendance(user_id, nfc_uid, name, department, device_id="unknown"):
         record_ref = records_ref.document()
         record_ref.set(attendance_data)
         
-        # Update the date document summary data
+        # Update only the count, not departments
         date_doc_ref.update({
-            'count': firestore.Increment(1),
-            f'departments.{department}': firestore.Increment(1)
+            'count': firestore.Increment(1)
+            # Removed the departments update
         })
         
         # Update user's status in registration
@@ -199,7 +226,7 @@ def daily_attendance():
         today = request.args.get('date', datetime.now(pytz.UTC).strftime("%Y-%m-%d"))
         
         # Get the date document first
-        date_doc_ref = db.collection('attendance_by_date').document(today)
+        date_doc_ref = db.collection('attendance').document(today)
         date_doc = date_doc_ref.get()
         
         if not date_doc.exists:
@@ -224,7 +251,6 @@ def daily_attendance():
         return jsonify({
             "date": today, 
             "count": summary.get('count', 0),
-            "departments": summary.get('departments', {}),
             "records": records
         }), 200
         
@@ -252,17 +278,15 @@ def migrate_attendance_data():
                     
                 date = data.get('date')
                 user_id = data.get('user_id')
-                department = data.get('department', 'Unknown')
                 
                 # Reference to date document
-                date_doc_ref = db.collection('attendance_by_date').document(date)
+                date_doc_ref = db.collection('attendance').document(date)
                 
                 # Create date document if it doesn't exist
                 if not date_doc_ref.get().exists:
                     date_doc_ref.set({
                         'date': date,
-                        'count': 0,
-                        'departments': {}
+                        'count': 0
                     })
                 
                 # Add to subcollection
@@ -272,8 +296,7 @@ def migrate_attendance_data():
                 
                 # Update summary counts
                 date_doc_ref.update({
-                    'count': firestore.Increment(1),
-                    f'departments.{department}': firestore.Increment(1)
+                    'count': firestore.Increment(1)
                 })
                 
                 migrated += 1
@@ -305,7 +328,7 @@ def attendance_dashboard():
                                       timedelta(days=7)).strftime("%Y-%m-%d"))
         
         # Query for date documents in range
-        date_docs = db.collection('attendance_by_date')\
+        date_docs = db.collection('attendance')\
                       .where('date', '>=', start_date)\
                       .where('date', '<=', end_date)\
                       .stream()
@@ -315,8 +338,7 @@ def attendance_dashboard():
             summary = date_doc.to_dict()
             results.append({
                 'date': summary.get('date'),
-                'count': summary.get('count', 0),
-                'departments': summary.get('departments', {})
+                'count': summary.get('count', 0)
             })
             
         # Sort by date
@@ -332,6 +354,42 @@ def attendance_dashboard():
         print(f"Dashboard error: {e}")
         return jsonify({"error": "Failed to load dashboard data"}), 500
 
+@app.route("/admin/cleanup/departments", methods=["POST"])
+def cleanup_departments():
+    """Remove departments field from date documents"""
+    try:
+        # Get all date documents
+        date_docs = db.collection('attendance_by_date').stream()
+        
+        cleaned = 0
+        failed = 0
+        
+        for date_doc in date_docs:
+            try:
+                # Get the document data to check if departments field exists
+                doc_data = date_doc.to_dict()
+                
+                if 'departments' in doc_data:
+                    # Remove the departments field
+                    db.collection('attendance_by_date').document(date_doc.id).update({
+                        'departments': firestore.DELETE_FIELD
+                    })
+                    cleaned += 1
+            except Exception as e:
+                print(f"Error cleaning document {date_doc.id}: {e}")
+                failed += 1
+        
+        return jsonify({
+            "status": "success",
+            "cleaned": cleaned,
+            "failed": failed
+        }), 200
+        
+    except Exception as e:
+        print(f"Cleanup error: {e}")
+        return jsonify({"error": f"Cleanup failed: {str(e)}"}), 500
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    app.run(debug=True, host="0.0.0.0", port=port)
+    debug_mode = os.environ.get("FLASK_ENV") != "production"
+    app.run(debug=debug_mode, host="0.0.0.0", port=port)
